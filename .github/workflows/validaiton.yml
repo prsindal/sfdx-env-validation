@@ -1,12 +1,12 @@
 name: Validate PR on CI branch
 
 on:
-    pull_request:
-      types: [opened, synchronize]
-      branches: [ ci, pre-ci/bau, pre-ci/sf24 ]
-      paths:
-        - 'force-app/**'
-            
+  workflow_dispatch:
+    inputs:
+      start-commit-ID:
+        description: Enter start commit start commit ID
+        required: true
+
 jobs:
     build-package:
         runs-on: ubuntu-latest
@@ -70,6 +70,9 @@ jobs:
                 path: builds/**
 
     validate-package-on-ci:
+        name: Validate on CI 
+        environment:
+          name: ci
         needs: build-package
         runs-on: ubuntu-latest
         if: ${{ github.actor != 'dependabot[bot]' }}
@@ -95,6 +98,41 @@ jobs:
                 path: builds
           
             - name: 'Validate Package in CI Org'
+              run: |
+                  TEST_CLASSES=$(cat builds/testclasses | xargs)
+                  if [ "$TEST_CLASSES" == "" ]; then TEST_CLASSES="NO_TEST_CLASS_TO_RUN"; fi
+                  echo "Test Classes to Run $TEST_CLASSES"
+                  sfdx force:source:deploy -p builds --wait 1 -l RunSpecifiedTests -r $TEST_CLASSES -c --verbose
+
+    validate-package-on-qa:
+        name: Validate on QA
+        environment:
+          name: qa
+        needs: build-package
+        runs-on: ubuntu-latest
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        steps:
+            - name: 'Checkout source code'
+              uses: actions/checkout@v3
+            
+            - name: 'Install Salesforce CLI'
+              run: |
+                  wget https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz
+                  mkdir ~/sfdx
+                  tar xJf sfdx-linux-x64.tar.xz -C ~/sfdx --strip-components 1
+                  echo "$HOME/sfdx/bin" >> $GITHUB_PATH
+                  ~/sfdx/bin/sfdx version
+            
+            - name: 'Authorize QA Org'
+              run: sfdx force:auth:jwt:grant -i ${{ secrets.QA_CLIENT_ID }} -f keys/server.key -u ${{ secrets.QA_USERNAME }} -s -r ${{ secrets.SANDBOX_URL }}
+
+            - name: 'Download Package'
+              uses: actions/download-artifact@v3.0.0
+              with:
+                name: package
+                path: builds
+          
+            - name: 'Validate Package in QA Org'
               run: |
                   TEST_CLASSES=$(cat builds/testclasses | xargs)
                   if [ "$TEST_CLASSES" == "" ]; then TEST_CLASSES="NO_TEST_CLASS_TO_RUN"; fi
