@@ -1,0 +1,102 @@
+name: Validate PR on CI branch
+
+on:
+    pull_request:
+      types: [opened, synchronize]
+      branches: [ ci, pre-ci/bau, pre-ci/sf24 ]
+      paths:
+        - 'force-app/**'
+            
+jobs:
+    build-package:
+        runs-on: ubuntu-latest
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        steps:
+            - name: 'Checkout source code'
+              uses: actions/checkout@v3
+              with:
+                fetch-depth: 0
+            
+            - name: 'Install Salesforce CLI'
+              run: |
+                  wget https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz
+                  mkdir ~/sfdx
+                  tar xJf sfdx-linux-x64.tar.xz -C ~/sfdx --strip-components 1
+                  echo "$HOME/sfdx/bin" >> $GITHUB_PATH
+                  ~/sfdx/bin/sfdx version
+            - name: 'Install sfpowerkit'
+              run: | 
+                  echo 'y' | sfdx plugins:install sfpowerkit
+                  sfdx plugins 
+            
+            - name: 'Create delta packages for new or modified metadata'
+              run: sfdx sfpowerkit:project:diff -d builds -r "HEAD^" -t "HEAD"
+            
+            - name: 'Fetch Test Class to Run'
+              run: |
+                  components=$(git diff --name-only --no-renames --diff-filter=ACMTUX HEAD~1 HEAD)
+                  test_class_names=''
+                  while read -r file_path; do
+                  line_no=0
+                  if [[ ${file_path} == *.cls-meta.xml || ${file_path} == *.trigger-meta.xml ]]
+                  then
+                    file_path=${file_path/-meta.xml/}
+                  fi
+                  if [[ ${file_path} == *.cls || ${file_path} == *.trigger ]]
+                  then
+                    while read -r codeline; do
+                      line_no=$((line_no+1));
+                      if grep -q "@TestClass" <<< "$codeline";
+                      then 
+                        test_class_names="${test_class_names}$(sed -e 's/.*@TestClass\s*\(\w*\(,\w*\)*\).*/\1/g' <<< $codeline)",
+                        break
+                      elif [ $line_no == 10 ];
+                      then
+                        break;
+                      fi
+                    done  < $file_path
+                  fi
+                  done <<< "$components"
+                  if [ "$test_class_names" != "" ];
+                  then 
+                    test_class_names="${test_class_names::-1}"
+                  fi
+                  echo "$test_class_names" > builds/testclasses
+                  echo "Test Classes to Run $(cat builds/testclasses)"
+            - name: Upload a Build Artifact
+              uses: actions/upload-artifact@v3.1.0
+              with:
+                name: package
+                path: builds/**
+
+    validate-package-on-ci:
+        needs: build-package
+        runs-on: ubuntu-latest
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        steps:
+            - name: 'Checkout source code'
+              uses: actions/checkout@v3
+            
+            - name: 'Install Salesforce CLI'
+              run: |
+                  wget https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz
+                  mkdir ~/sfdx
+                  tar xJf sfdx-linux-x64.tar.xz -C ~/sfdx --strip-components 1
+                  echo "$HOME/sfdx/bin" >> $GITHUB_PATH
+                  ~/sfdx/bin/sfdx version
+            
+            - name: 'Authorize CI Org'
+              run: sfdx force:auth:jwt:grant -i ${{ secrets.CI_CLIENT_ID }} -f keys/server.key -u ${{ secrets.CI_USERNAME }} -s -r ${{ secrets.SANDBOX_URL }}
+
+            - name: 'Download Package'
+              uses: actions/download-artifact@v3.0.0
+              with:
+                name: package
+                path: builds
+          
+            - name: 'Validate Package in CI Org'
+              run: |
+                  TEST_CLASSES=$(cat builds/testclasses | xargs)
+                  if [ "$TEST_CLASSES" == "" ]; then TEST_CLASSES="NO_TEST_CLASS_TO_RUN"; fi
+                  echo "Test Classes to Run $TEST_CLASSES"
+                  sfdx force:source:deploy -p builds --wait 1 -l RunSpecifiedTests -r $TEST_CLASSES -c --verbose
