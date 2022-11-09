@@ -34,7 +34,7 @@ jobs:
             
             - name: 'Fetch Test Class to Run'
               run: |
-                  components=$(git diff --name-only --no-renames --diff-filter=ACMTUX HEAD~1 HEAD)
+                  components=$(git diff --name-only --no-renames --diff-filter=ACMTUX ${{ github.event.inputs.start-commit-ID }} HEAD)
                   test_class_names=''
                   while read -r file_path; do
                   line_no=0
