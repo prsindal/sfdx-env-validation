@@ -30,7 +30,7 @@ jobs:
                   sfdx plugins 
             
             - name: 'Create delta packages for new or modified metadata'
-              run: sfdx sfpowerkit:project:diff -d builds -r "HEAD^" -t "HEAD"
+              run: sfdx sfpowerkit:project:diff -d builds -r $start-commit-ID -t "HEAD"
             
             - name: 'Fetch Test Class to Run'
               run: |
