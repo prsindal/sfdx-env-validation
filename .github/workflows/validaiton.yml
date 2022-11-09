@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       start-commit-ID:
-        description: Enter start commit start commit ID
+        description: Enter start commit ID
         required: true
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
                   sfdx plugins 
             
             - name: 'Create delta packages for new or modified metadata'
-              run: sfdx sfpowerkit:project:diff -d builds -r $start-commit-ID -t "HEAD"
+              run: sfdx sfpowerkit:project:diff -d builds -r "${{ github.event.inputs.start-commit-ID }}" -t "HEAD"
             
             - name: 'Fetch Test Class to Run'
               run: |
