@@ -1,4 +1,4 @@
-name: Validate PR on CI branch
+name: Validation
 
 on:
   workflow_dispatch:
